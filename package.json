@@ -1,0 +1,22 @@
+{
+  "name": "learning-graphql",
+  "version": "0.1.0",
+  "description": "learning graphql with apollo server",
+  "main": "index.js",
+  "scripts": {
+    "start": "nodemon index",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "learning",
+    "graphql",
+    "apollo",
+    "server"
+  ],
+  "author": "Naren",
+  "license": "MIT",
+  "dependencies": {
+    "apollo-server": "^2.15.1",
+    "graphql": "^15.2.0"
+  }
+}
