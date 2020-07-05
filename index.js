@@ -6,7 +6,6 @@ const Author = require('./models/author');
 
 mongoose.set('useFindAndModify', false);
 
-console.log('process.env.MONGO_URI: ', process.env.MONGO_URI);
 mongoose
   .connect(process.env.MONGO_URI, { useNewUrlParser: true, useUnifiedTopology: true })
   .then(() => {
@@ -51,13 +50,12 @@ const resolvers = {
     authorCount: () => Author.collection.countDocuments(),
     allBooks: (root, args) => {
       if (!args.author && !args.genre) {
-        return books;
+        return Book.find({}).populate('author');
       } else if (args.author && !args.genre) {
         const byAuthor = (book) => args.author === book.author;
         return books.filter(byAuthor);
       } else if (!args.author && args.genre) {
-        const byGenre = (book) => book.genres.includes(args.genre);
-        return books.filter(byGenre);
+        return Book.find({ genres: { $in: [args.genre] } }).populate('author');
       }
       const byAuthorAndGenre = (book) => {
         return book.author === args.author && book.genres.includes(args.genre);
@@ -79,38 +77,78 @@ const resolvers = {
       }, 0);
     },
   },
-  Book: {
-    author: (root) => {
-      console.log('root: ', root);
-      return (root) => new Author(root);
-    },
-  },
+  // Book: {
+  //   author: async ({author}) => {
+  //     console.log('root: ', root);
+  //     return (root) => new Author(root.author);
+  //   },
+  // },
   Mutation: {
-    addBook: (root, args) => {
-      if (books.find((b) => b.title === args.title)) {
+    addBook: async (root, args) => {
+      const book = await Book.findOne({ title: args.title });
+
+      if (book) {
         throw new UserInputError('Title must be unique', {
           invalidArgs: args.title,
         });
       }
 
-      const book = { ...args, id: uuid() };
-      books = books.concat(book);
+      const author = await Author.findOne({ name: args.author });
+      let newAuthor;
+      let newBook;
 
-      if (!authors.includes(book.author)) {
-        authors = authors.concat({ name: args.author, id: uuid() });
+      if (!author) {
+        newAuthor = new Author({ name: args.author });
+
+        try {
+          await newAuthor.save();
+        } catch (error) {
+          switch (error.errors['name'].kind) {
+            case 'minlength':
+              throw new UserInputError('Name must be at least 5 characters long!', {
+                invalidArgs: args,
+              });
+            default:
+            case 'required':
+              throw new UserInputError('Name is required!', {
+                invalidArgs: args,
+              });
+          }
+        }
+        return newAuthor;
       }
 
-      return book;
+      if (newAuthor) {
+        newBook = new Book({ ...args, author: newAuthor._id });
+      } else {
+        newBook = new Book({ ...args, author: author._id });
+      }
+
+      try {
+        await newBook.save();
+      } catch (error) {
+        switch (error.errors['title'].kind) {
+          case 'minlength':
+            throw new UserInputError('Title must be at least 2 characters long!', {
+              invalidArgs: args,
+            });
+          default:
+          case 'required':
+            throw new UserInputError('Title is required!', {
+              invalidArgs: args,
+            });
+        }
+      }
+      return newBook;
     },
-    editAuthor: (root, args) => {
-      const author = authors.find((a) => a.name === args.name);
+    editAuthor: async (root, args) => {
+      const author = await Author.findOne({ name: args.name });
       if (!author) {
         return null;
       }
 
-      const updatedAuthor = { ...author, born: args.setBornTo };
-      authors = authors.map((a) => (a.name === args.name ? updatedAuthor : a));
-      return updatedAuthor;
+      author.born = args.setBornTo;
+      return author.save();
     },
   },
 };
