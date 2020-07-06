@@ -8,6 +8,16 @@ const resolvers = {
   Query: {
     bookCount: () => Book.collection.countDocuments(),
     authorCount: () => Author.collection.countDocuments(),
+    allGenres: async () => {
+      const books = await Book.find({});
+      let allGenres = [];
+
+      books.forEach((b) => {
+        allGenres = allGenres.concat(...b.genres);
+      });
+
+      return [...new Set(allGenres)];
+    },
     allBooks: (root, args) => {
       if (!args.author && !args.genre) {
         return Book.find({}).populate('author');
@@ -47,10 +57,15 @@ const resolvers = {
       }
 
       const book = await Book.findOne({ title: args.title });
-
       if (book) {
         throw new UserInputError('Title must be unique', {
           invalidArgs: args.title,
+        });
+      }
+
+      if (!book && (!args.title || !args.author || !args.published || args.genres.length === 0)) {
+        throw new UserInputError('Please fill all the values of the book', {
+          invalidArgs: args,
         });
       }
 
@@ -129,8 +144,6 @@ const resolvers = {
       try {
         await newUser.save();
       } catch (error) {
-        console.log('error: ', error.errors);
-
         if (error.errors['favoriteGenre'].kind) {
           throw new UserInputError('Favorite genre is required', {
             invalidArgs: args,
@@ -149,6 +162,7 @@ const resolvers = {
             });
         }
       }
+
       return newUser;
     },
     login: async (root, args) => {
