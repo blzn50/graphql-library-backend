@@ -1,8 +1,31 @@
-const { UserInputError, AuthenticationError } = require('apollo-server');
+const { UserInputError, AuthenticationError, PubSub } = require('apollo-server');
 const jwt = require('jsonwebtoken');
 const Book = require('./models/book');
 const Author = require('./models/author');
 const User = require('./models/user');
+
+const pubsub = new PubSub();
+
+const bookAddingHelper = async (book, args, author) => {
+  const newBookToAdd = new book({ ...args, author: author._id });
+  try {
+    await newBookToAdd.save();
+    newBookToAdd.author = author;
+  } catch (error) {
+    switch (error.errors['title'].kind) {
+      case 'minlength':
+        throw new UserInputError('Title must be at least 2 characters long!', {
+          invalidArgs: args,
+        });
+      default:
+      case 'required':
+        throw new UserInputError('Title is required!', {
+          invalidArgs: args,
+        });
+    }
+  }
+  return newBookToAdd;
+};
 
 const resolvers = {
   Query: {
@@ -95,26 +118,13 @@ const resolvers = {
       }
 
       if (newAuthor) {
-        newBook = new Book({ ...args, author: newAuthor._id });
+        newBook = await bookAddingHelper(Book, args, newAuthor);
       } else {
-        newBook = new Book({ ...args, author: author._id });
+        newBook = await bookAddingHelper(Book, args, author);
       }
 
-      try {
-        await newBook.save();
-      } catch (error) {
-        switch (error.errors['title'].kind) {
-          case 'minlength':
-            throw new UserInputError('Title must be at least 2 characters long!', {
-              invalidArgs: args,
-            });
-          default:
-          case 'required':
-            throw new UserInputError('Title is required!', {
-              invalidArgs: args,
-            });
-        }
-      }
+      pubsub.publish('BOOK_ADDED', { bookAdded: newBook });
+
       return newBook;
     },
     editAuthor: async (root, args, { currentUser }) => {
@@ -178,6 +188,11 @@ const resolvers = {
       };
 
       return { value: jwt.sign(userForToken, process.env.JWT_SECRET) };
+    },
+  },
+  Subscription: {
+    bookAdded: {
+      subscribe: () => pubsub.asyncIterator(['BOOK_ADDED']),
     },
   },
 };
