@@ -15,4 +15,12 @@ const authorSchema = new mongoose.Schema({
 
 authorSchema.plugin(uniqueValidator);
 
+authorSchema.virtual('bookCount', {
+  ref: 'Book',
+  localField: '_id',
+  foreignField: 'author',
+  count: true,
+  // justOne: false,
+});
+
 module.exports = mongoose.model('Author', authorSchema);

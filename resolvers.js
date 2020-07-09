@@ -1,8 +1,31 @@
-const { UserInputError, AuthenticationError } = require('apollo-server');
+const { UserInputError, AuthenticationError, PubSub } = require('apollo-server');
 const jwt = require('jsonwebtoken');
 const Book = require('./models/book');
 const Author = require('./models/author');
 const User = require('./models/user');
+
+const pubsub = new PubSub();
+
+const bookAddingHelper = async (book, args, author) => {
+  const newBookToAdd = new book({ ...args, author: author._id });
+  try {
+    await newBookToAdd.save();
+    newBookToAdd.author = author;
+  } catch (error) {
+    switch (error.errors['title'].kind) {
+      case 'minlength':
+        throw new UserInputError('Title must be at least 2 characters long!', {
+          invalidArgs: args,
+        });
+      default:
+      case 'required':
+        throw new UserInputError('Title is required!', {
+          invalidArgs: args,
+        });
+    }
+  }
+  return newBookToAdd;
+};
 
 const resolvers = {
   Query: {
@@ -13,41 +36,39 @@ const resolvers = {
       let allGenres = [];
 
       books.forEach((b) => {
-        allGenres = allGenres.concat(...b.genres);
+        allGenres = allGenres.concat(...b.genres, 'all');
       });
 
       return [...new Set(allGenres)];
     },
     allBooks: (root, args) => {
       if (!args.author && !args.genre) {
-        return Book.find({}).populate('author');
+        return Book.find({}).populate({ path: 'author', populate: 'bookCount' });
       } else if (args.author && !args.genre) {
         const byAuthor = (book) => args.author === book.author;
         return books.filter(byAuthor);
       } else if (!args.author && args.genre) {
-        return Book.find({ genres: { $in: [args.genre] } }).populate('author');
+        if (args.genre === 'all') {
+          return Book.find({}).populate('author');
+        }
+        return Book.find({ genres: { $in: [args.genre] } }).populate({
+          path: 'author',
+          populate: 'bookCount',
+        });
       }
       const byAuthorAndGenre = (book) => {
         return book.author === args.author && book.genres.includes(args.genre);
       };
       return books.filter(byAuthorAndGenre);
     },
-    allAuthors: () => {
-      return Author.find({});
+    allAuthors: async (_, __, ___, info) => {
+      // const bookCountNode = info.fieldNodes[0].selectionSet.selections;
+      // if(bookCount.includes)
+      const authors = await Author.find({}).populate('bookCount');
+      return authors;
     },
     me: (root, args, context) => {
       return context.currentUser;
-    },
-  },
-  Author: {
-    bookCount: async (root) => {
-      const books = await Book.find({}).populate('author');
-      return books.reduce((acc, i) => {
-        if (i.author.id === root.id) {
-          acc++;
-        }
-        return acc++;
-      }, 0);
     },
   },
   Mutation: {
@@ -69,15 +90,16 @@ const resolvers = {
         });
       }
 
-      const author = await Author.findOne({ name: args.author });
-      let newAuthor;
+      const author = await Author.findOne({ name: args.author }).populate('bookCount');
       let newBook;
 
       if (!author) {
-        newAuthor = new Author({ name: args.author });
+        const newAuthor = new Author({ name: args.author });
 
         try {
           await newAuthor.save();
+          newAuthor.populate('bookCount');
+          newBook = await bookAddingHelper(Book, args, newAuthor);
         } catch (error) {
           switch (error.errors['name'].kind) {
             case 'minlength':
@@ -91,30 +113,12 @@ const resolvers = {
               });
           }
         }
-        return newAuthor;
-      }
-
-      if (newAuthor) {
-        newBook = new Book({ ...args, author: newAuthor._id });
       } else {
-        newBook = new Book({ ...args, author: author._id });
+        newBook = await bookAddingHelper(Book, args, author);
       }
 
-      try {
-        await newBook.save();
-      } catch (error) {
-        switch (error.errors['title'].kind) {
-          case 'minlength':
-            throw new UserInputError('Title must be at least 2 characters long!', {
-              invalidArgs: args,
-            });
-          default:
-          case 'required':
-            throw new UserInputError('Title is required!', {
-              invalidArgs: args,
-            });
-        }
-      }
+      pubsub.publish('BOOK_ADDED', { bookAdded: newBook });
+
       return newBook;
     },
     editAuthor: async (root, args, { currentUser }) => {
@@ -178,6 +182,11 @@ const resolvers = {
       };
 
       return { value: jwt.sign(userForToken, process.env.JWT_SECRET) };
+    },
+  },
+  Subscription: {
+    bookAdded: {
+      subscribe: () => pubsub.asyncIterator(['BOOK_ADDED']),
     },
   },
 };
