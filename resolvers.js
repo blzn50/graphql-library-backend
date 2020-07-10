@@ -41,7 +41,7 @@ const resolvers = {
 
       return [...new Set(allGenres)];
     },
-    allBooks: (root, args) => {
+    allBooks: (root, args, __, info) => {
       if (!args.author && !args.genre) {
         return Book.find({}).populate({ path: 'author', populate: 'bookCount' });
       } else if (args.author && !args.genre) {
@@ -62,10 +62,13 @@ const resolvers = {
       return books.filter(byAuthorAndGenre);
     },
     allAuthors: async (_, __, ___, info) => {
-      // const bookCountNode = info.fieldNodes[0].selectionSet.selections;
-      // if(bookCount.includes)
-      const authors = await Author.find({}).populate('bookCount');
-      return authors;
+      const queryNodes = info.fieldNodes[0].selectionSet.selections;
+
+      if (queryNodes.some((n) => n.name.value === 'bookCount')) {
+        return await Author.find({}).populate('bookCount');
+      }
+
+      return await Author.find({});
     },
     me: (root, args, context) => {
       return context.currentUser;
