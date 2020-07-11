@@ -41,25 +41,60 @@ const resolvers = {
 
       return [...new Set(allGenres)];
     },
-    allBooks: (root, args, __, info) => {
+    allBooks: async (root, args, __, info) => {
+      const queryNodes = info.fieldNodes[0].selectionSet.selections;
+      const innerQueryNode = queryNodes.find((qn) => qn.name.value === 'author');
+
       if (!args.author && !args.genre) {
-        return Book.find({}).populate({ path: 'author', populate: 'bookCount' });
+        return await Book.find({}).populate({ path: 'author', populate: 'bookCount' });
       } else if (args.author && !args.genre) {
-        const byAuthor = (book) => args.author === book.author;
-        return books.filter(byAuthor);
+        const author = await Author.findOne({ name: args.author });
+
+        if (!author) {
+          throw new UserInputError("The requested author doesn't have any book.", {
+            invalidArgs: args.author,
+          });
+        }
+
+        if (innerQueryNode.selectionSet.selections.some((n) => n.name.value === 'bookCount')) {
+          return await Book.find({ author: author._id }).populate({
+            path: 'author',
+            populate: 'bookCount',
+          });
+        }
+
+        return await Book.find({ author: author._id }).populate({
+          path: 'author',
+        });
       } else if (!args.author && args.genre) {
         if (args.genre === 'all') {
-          return Book.find({}).populate('author');
+          return await Book.find({}).populate('author');
         }
+
+        if (innerQueryNode.selectionSet.selections.some((n) => n.name.value === 'bookCount')) {
+          return await Book.find({ genres: { $in: [args.genre] } }).populate({
+            path: 'author',
+            populate: 'bookCount',
+          });
+        }
+
         return Book.find({ genres: { $in: [args.genre] } }).populate({
+          path: 'author',
+        });
+      }
+
+      const author = await Author.findOne({ name: args.author });
+
+      if (innerQueryNode.selectionSet.selections.some((n) => n.name.value === 'bookCount')) {
+        return await Book.find({ author: author._id, genres: { $in: [args.genre] } }).populate({
           path: 'author',
           populate: 'bookCount',
         });
       }
-      const byAuthorAndGenre = (book) => {
-        return book.author === args.author && book.genres.includes(args.genre);
-      };
-      return books.filter(byAuthorAndGenre);
+
+      return await Book.find({ author: author._id, genres: { $in: [args.genre] } }).populate({
+        path: 'author',
+      });
     },
     allAuthors: async (_, __, ___, info) => {
       const queryNodes = info.fieldNodes[0].selectionSet.selections;
